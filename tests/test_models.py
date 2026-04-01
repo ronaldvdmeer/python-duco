@@ -1,0 +1,252 @@
+"""Tests for the data models."""
+
+from __future__ import annotations
+
+import pytest
+
+from duco.models import (
+    ApiInfo,
+    BoardInfo,
+    DiagComponent,
+    LanInfo,
+    NetworkType,
+    Node,
+    NodeGeneralInfo,
+    NodeSensorInfo,
+    NodeType,
+    NodeVentilationInfo,
+    VentilationMode,
+    VentilationState,
+    Zone,
+    ZoneGroup,
+)
+
+
+class TestVentilationState:
+    """Test VentilationState enum."""
+
+    def test_all_states_exist(self):
+        """Verify key ventilation states are defined."""
+        assert VentilationState.AUTO == "AUTO"
+        assert VentilationState.MAN1 == "MAN1"
+        assert VentilationState.MAN2 == "MAN2"
+        assert VentilationState.MAN3 == "MAN3"
+        assert VentilationState.CNT1 == "CNT1"
+        assert VentilationState.EMPT == "EMPT"
+
+    def test_str_value(self):
+        """VentilationState can be compared to plain strings."""
+        assert VentilationState.MAN2 == "MAN2"
+
+
+class TestNodeType:
+    """Test NodeType enum."""
+
+    def test_node_types(self):
+        assert NodeType.BOX == "BOX"
+        assert NodeType.UCCO2 == "UCCO2"
+        assert NodeType.BSRH == "BSRH"
+
+
+class TestNetworkType:
+    """Test NetworkType enum."""
+
+    def test_network_types(self):
+        assert NetworkType.VIRT == "VIRT"
+        assert NetworkType.RF == "RF"
+
+
+class TestVentilationMode:
+    """Test VentilationMode enum."""
+
+    def test_modes(self):
+        assert VentilationMode.MANU == "MANU"
+        assert VentilationMode.AUTO == "AUTO"
+        assert VentilationMode.NONE == "-"
+
+
+class TestApiInfo:
+    """Test ApiInfo dataclass."""
+
+    def test_create(self):
+        info = ApiInfo(api_version="2.5")
+        assert info.api_version == "2.5"
+
+    def test_frozen(self):
+        info = ApiInfo(api_version="2.5")
+        with pytest.raises(AttributeError):
+            info.api_version = "3.0"  # type: ignore[misc]
+
+
+class TestBoardInfo:
+    """Test BoardInfo dataclass."""
+
+    def test_create(self):
+        board = BoardInfo(
+            box_name="SILENT_CONNECT",
+            box_sub_type_name="Eu",
+            serial_board_box="RS2420002577",
+            serial_board_comm="PS2424005629",
+            serial_duco_box="n/a",
+            serial_duco_comm="P369348-241126-033",
+            time=1775082497,
+        )
+        assert board.box_name == "SILENT_CONNECT"
+        assert board.box_sub_type_name == "Eu"
+        assert board.time == 1775082497
+
+    def test_frozen(self):
+        board = BoardInfo(
+            box_name="SILENT_CONNECT",
+            box_sub_type_name="Eu",
+            serial_board_box="RS2420002577",
+            serial_board_comm="PS2424005629",
+            serial_duco_box="n/a",
+            serial_duco_comm="P369348-241126-033",
+            time=1775082497,
+        )
+        with pytest.raises(AttributeError):
+            board.box_name = "OTHER"  # type: ignore[misc]
+
+
+class TestDiagComponent:
+    """Test DiagComponent dataclass."""
+
+    def test_create(self):
+        comp = DiagComponent(component="Ventilation", status="Ok")
+        assert comp.component == "Ventilation"
+        assert comp.status == "Ok"
+
+
+class TestNodeSensorInfo:
+    """Test NodeSensorInfo dataclass."""
+
+    def test_full(self):
+        sensor = NodeSensorInfo(co2=536, iaq_co2=100)
+        assert sensor.co2 == 536
+        assert sensor.iaq_co2 == 100
+
+    def test_optional_fields_default_none(self):
+        sensor = NodeSensorInfo()
+        assert sensor.co2 is None
+        assert sensor.iaq_co2 is None
+
+
+class TestNodeVentilationInfo:
+    """Test NodeVentilationInfo dataclass."""
+
+    def test_create(self):
+        vent = NodeVentilationInfo(
+            state="CNT1",
+            time_state_remain=0,
+            time_state_end=0,
+            mode="MANU",
+            flow_lvl_tgt=15,
+        )
+        assert vent.state == "CNT1"
+        assert vent.flow_lvl_tgt == 15
+
+    def test_flow_lvl_tgt_optional(self):
+        vent = NodeVentilationInfo(
+            state="CNT1",
+            time_state_remain=0,
+            time_state_end=0,
+            mode="-",
+        )
+        assert vent.flow_lvl_tgt is None
+
+
+class TestNodeGeneralInfo:
+    """Test NodeGeneralInfo dataclass."""
+
+    def test_create(self):
+        general = NodeGeneralInfo(
+            node_type="BOX",
+            sub_type=1,
+            network_type="VIRT",
+            parent=0,
+            asso=0,
+            name="",
+            identify=0,
+        )
+        assert general.node_type == "BOX"
+        assert general.parent == 0
+
+
+class TestNode:
+    """Test Node dataclass."""
+
+    def _make_general(self, node_type="BOX", network_type="VIRT", parent=0):
+        return NodeGeneralInfo(
+            node_type=node_type,
+            sub_type=0,
+            network_type=network_type,
+            parent=parent,
+            asso=0,
+            name="",
+            identify=0,
+        )
+
+    def _make_ventilation(self, state="CNT1", mode="MANU"):
+        return NodeVentilationInfo(
+            state=state,
+            time_state_remain=0,
+            time_state_end=0,
+            mode=mode,
+        )
+
+    def test_box_node(self):
+        node = Node(
+            node_id=1,
+            general=self._make_general(),
+            ventilation=self._make_ventilation(),
+        )
+        assert node.node_id == 1
+        assert node.general.node_type == "BOX"
+        assert node.sensor is None
+
+    def test_sensor_node(self):
+        node = Node(
+            node_id=2,
+            general=self._make_general(node_type="UCCO2", network_type="RF", parent=1),
+            ventilation=self._make_ventilation(mode="-"),
+            sensor=NodeSensorInfo(co2=536, iaq_co2=100),
+        )
+        assert node.sensor is not None
+        assert node.sensor.co2 == 536
+
+    def test_frozen(self):
+        node = Node(node_id=1, general=self._make_general())
+        with pytest.raises(AttributeError):
+            node.node_id = 99  # type: ignore[misc]
+
+
+class TestZoneGroup:
+    """Test ZoneGroup dataclass."""
+
+    def test_create(self):
+        group = ZoneGroup(group_id=1, nodes=[2, 113])
+        assert group.group_id == 1
+        assert group.nodes == [2, 113]
+
+    def test_empty_nodes_default(self):
+        group = ZoneGroup(group_id=1)
+        assert group.nodes == []
+
+
+class TestZone:
+    """Test Zone dataclass."""
+
+    def test_create(self):
+        zone = Zone(
+            zone_id=1,
+            name="VentEtaCentral",
+            groups=[ZoneGroup(group_id=1, nodes=[2, 113])],
+        )
+        assert zone.zone_id == 1
+        assert zone.name == "VentEtaCentral"
+        assert len(zone.groups) == 1
+
+    def test_empty_groups_default(self):
+        zone = Zone(zone_id=1, name="Test")
+        assert zone.groups == []

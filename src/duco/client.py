@@ -1,0 +1,415 @@
+"""Async client for the Duco ventilation API."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from aiohttp import ClientSession
+
+from .exceptions import (
+    DucoConnectionError,
+    DucoError,
+    DucoRateLimitError,
+)
+from .models import (
+    ApiInfo,
+    BoardInfo,
+    DiagComponent,
+    LanInfo,
+    Node,
+    NodeGeneralInfo,
+    NodeSensorInfo,
+    NodeVentilationInfo,
+    Zone,
+    ZoneGroup,
+)
+
+
+class DucoClient:
+    """Async client for the Duco ventilation box REST API.
+
+    Example::
+
+        async with aiohttp.ClientSession() as session:
+            client = DucoClient(session=session, host="192.168.3.94")
+            info = await client.async_get_board_info()
+            print(f"Box: {info.box_name}")
+
+            nodes = await client.async_get_nodes()
+            for node in nodes:
+                print(f"Node {node.node_id}: {node.general.node_type}")
+    """
+
+    def __init__(
+        self,
+        session: ClientSession,
+        host: str,
+        scheme: str = "http",
+    ) -> None:
+        """Initialize the client.
+
+        Args:
+            session: aiohttp session for HTTP requests.
+            host: IP address or hostname of the Duco box.
+            scheme: URL scheme (default ``"http"``).
+        """
+        self._session = session
+        self._base_url = f"{scheme}://{host}"
+
+    # -------------------------------------------------------------------------
+    # Internal helpers
+    # -------------------------------------------------------------------------
+
+    async def _request(
+        self, method: str, path: str, **kwargs: Any
+    ) -> Any:
+        """Make a request to the Duco API.
+
+        Args:
+            method: HTTP method.
+            path: API path (e.g. ``"/info"``).
+            **kwargs: Additional arguments for the HTTP request.
+
+        Returns:
+            Parsed JSON response.
+
+        Raises:
+            DucoConnectionError: If the box is unreachable.
+            DucoError: For API errors.
+        """
+        try:
+            response = await self._session.request(
+                method,
+                f"{self._base_url}{path}",
+                **kwargs,
+            )
+        except Exception as err:
+            msg = f"Failed to connect to Duco box: {err}"
+            raise DucoConnectionError(msg) from err
+
+        if response.status >= 400:
+            text = await response.text()
+            msg = f"Duco API error ({response.status}): {text}"
+            raise DucoError(msg)
+
+        return await response.json()
+
+    @staticmethod
+    def _val(data: dict[str, Any]) -> Any:
+        """Extract the ``Val`` field from a Duco API value wrapper."""
+        return data["Val"]
+
+    # -------------------------------------------------------------------------
+    # API info
+    # -------------------------------------------------------------------------
+
+    async def async_get_api_info(self) -> ApiInfo:
+        """Get the API version information.
+
+        Returns:
+            API version info.
+        """
+        data = await self._request("GET", "/api")
+        return ApiInfo(
+            api_version=self._val(data["PublicApiVersion"]),
+        )
+
+    # -------------------------------------------------------------------------
+    # Box info
+    # -------------------------------------------------------------------------
+
+    async def async_get_info(self) -> dict[str, Any]:
+        """Get all box information (raw).
+
+        Returns:
+            Raw JSON response from ``/info``.
+        """
+        return await self._request("GET", "/info")
+
+    async def async_get_board_info(self) -> BoardInfo:
+        """Get board information.
+
+        Returns:
+            Board info with serial numbers and box identification.
+        """
+        data = await self._request(
+            "GET", "/info", params={"module": "General", "submodule": "Board"}
+        )
+        board = data["General"]["Board"]
+        return BoardInfo(
+            box_name=self._val(board["BoxName"]),
+            box_sub_type_name=self._val(board["BoxSubTypeName"]),
+            serial_board_box=self._val(board["SerialBoardBox"]),
+            serial_board_comm=self._val(board["SerialBoardComm"]),
+            serial_duco_box=self._val(board["SerialDucoBox"]),
+            serial_duco_comm=self._val(board["SerialDucoComm"]),
+            time=self._val(board["Time"]),
+        )
+
+    async def async_get_lan_info(self) -> LanInfo:
+        """Get network / LAN information.
+
+        Returns:
+            Network info with IP, MAC, WiFi signal, etc.
+        """
+        data = await self._request(
+            "GET", "/info", params={"module": "General", "submodule": "Lan"}
+        )
+        lan = data["General"]["Lan"]
+        return LanInfo(
+            mode=self._val(lan["Mode"]),
+            ip=self._val(lan["Ip"]),
+            net_mask=self._val(lan["NetMask"]),
+            default_gateway=self._val(lan["DefaultGateway"]),
+            dns=self._val(lan["Dns"]),
+            mac=self._val(lan["Mac"]),
+            host_name=self._val(lan["HostName"]),
+            rssi_wifi=self._val(lan["RssiWifi"]),
+        )
+
+    async def async_get_diagnostics(self) -> list[DiagComponent]:
+        """Get diagnostic subsystem statuses.
+
+        Returns:
+            List of diagnostic component statuses.
+        """
+        data = await self._request(
+            "GET", "/info", params={"module": "Diag"}
+        )
+        return [
+            DiagComponent(
+                component=item["Component"],
+                status=item["Status"],
+            )
+            for item in data["Diag"]["SubSystems"]
+        ]
+
+    async def async_get_write_req_remaining(self) -> int:
+        """Get the number of remaining API write requests.
+
+        Returns:
+            Number of remaining write requests.
+        """
+        data = await self._request(
+            "GET",
+            "/info",
+            params={"module": "General", "submodule": "PublicApi"},
+        )
+        return self._val(data["General"]["PublicApi"]["WriteReqCntRemain"])
+
+    # -------------------------------------------------------------------------
+    # Nodes
+    # -------------------------------------------------------------------------
+
+    async def async_get_nodes(self) -> list[Node]:
+        """Get all nodes with their details.
+
+        Returns:
+            List of nodes with general info, ventilation state, and sensor data.
+        """
+        data = await self._request("GET", "/info/nodes")
+        return [self._parse_node(node_data) for node_data in data["Nodes"]]
+
+    async def async_get_node(self, node_id: int) -> Node:
+        """Get a specific node by ID.
+
+        Args:
+            node_id: The node ID.
+
+        Returns:
+            Node with general info, ventilation state, and sensor data.
+        """
+        data = await self._request("GET", f"/info/nodes/{node_id}")
+        return self._parse_node(data)
+
+    def _parse_node(self, data: dict[str, Any]) -> Node:
+        """Parse a node from the API response."""
+        general_data = data["General"]
+        general = NodeGeneralInfo(
+            node_type=self._val(general_data["Type"]),
+            sub_type=self._val(general_data["SubType"]),
+            network_type=self._val(general_data["NetworkType"]),
+            parent=self._val(general_data["Parent"]),
+            asso=self._val(general_data["Asso"]),
+            name=self._val(general_data["Name"]),
+            identify=self._val(general_data["Identify"]),
+        )
+
+        ventilation = None
+        if "Ventilation" in data:
+            vent_data = data["Ventilation"]
+            ventilation = NodeVentilationInfo(
+                state=self._val(vent_data["State"]),
+                time_state_remain=self._val(vent_data["TimeStateRemain"]),
+                time_state_end=self._val(vent_data["TimeStateEnd"]),
+                mode=self._val(vent_data["Mode"]),
+                flow_lvl_tgt=self._val(vent_data["FlowLvlTgt"])
+                if "FlowLvlTgt" in vent_data
+                else None,
+            )
+
+        sensor = None
+        if "Sensor" in data:
+            sensor_data = data["Sensor"]
+            sensor = NodeSensorInfo(
+                co2=self._val(sensor_data["Co2"])
+                if "Co2" in sensor_data
+                else None,
+                iaq_co2=self._val(sensor_data["IaqCo2"])
+                if "IaqCo2" in sensor_data
+                else None,
+            )
+
+        return Node(
+            node_id=data["Node"],
+            general=general,
+            ventilation=ventilation,
+            sensor=sensor,
+        )
+
+    async def async_get_node_ids(self) -> list[int]:
+        """Get a list of all node IDs.
+
+        Returns:
+            List of node IDs.
+        """
+        data = await self._request("GET", "/nodes")
+        return [item["Node"] for item in data["value"]]
+
+    # -------------------------------------------------------------------------
+    # Zones
+    # -------------------------------------------------------------------------
+
+    async def async_get_zones(self) -> list[Zone]:
+        """Get all zones with their groups.
+
+        Returns:
+            List of zones.
+        """
+        data = await self._request("GET", "/info/zones")
+        return [self._parse_zone(zone_data) for zone_data in data["Zones"]]
+
+    async def async_get_zone(self, zone_id: int) -> Zone:
+        """Get a specific zone by ID.
+
+        Args:
+            zone_id: The zone ID.
+
+        Returns:
+            Zone with groups.
+        """
+        data = await self._request("GET", f"/info/zones/{zone_id}")
+        return self._parse_zone(data)
+
+    def _parse_zone(self, data: dict[str, Any]) -> Zone:
+        """Parse a zone from the API response."""
+        groups = []
+        for group_data in data.get("Groups", []):
+            nodes = group_data.get("DeviceGroupConfig", {}).get("General", {}).get("Nodes", [])
+            groups.append(
+                ZoneGroup(
+                    group_id=group_data["Group"],
+                    nodes=list(nodes),
+                )
+            )
+
+        name = self._val(
+            data.get("DeviceGroupConfig", {}).get("General", {}).get("Name", {"Val": ""})
+        )
+
+        return Zone(
+            zone_id=data["Zone"],
+            name=name,
+            groups=groups,
+        )
+
+    # -------------------------------------------------------------------------
+    # Actions
+    # -------------------------------------------------------------------------
+
+    async def async_set_ventilation_state(
+        self, node_id: int, state: str
+    ) -> None:
+        """Set the ventilation state for a node.
+
+        Args:
+            node_id: The node ID.
+            state: Ventilation state (e.g. ``"AUTO"``, ``"MAN1"``, ``"MAN3"``).
+                   See :class:`~duco.models.VentilationState` for all values.
+
+        Raises:
+            DucoRateLimitError: If the write rate limit is exceeded.
+        """
+        await self._request(
+            "POST",
+            f"/action/nodes/{node_id}",
+            json={"Action": "SetVentilationState", "Val": state},
+        )
+
+    async def async_set_identify(
+        self, node_id: int, *, enabled: bool
+    ) -> None:
+        """Enable or disable identification mode on a node.
+
+        Args:
+            node_id: The node ID.
+            enabled: Whether to enable identification.
+        """
+        await self._request(
+            "POST",
+            f"/action/nodes/{node_id}",
+            json={"Action": "SetIdentify", "Val": enabled},
+        )
+
+    async def async_set_identify_all(self, *, enabled: bool) -> None:
+        """Enable or disable identification mode on all devices.
+
+        Args:
+            enabled: Whether to enable identification.
+        """
+        await self._request(
+            "POST",
+            "/action",
+            json={"Action": "SetIdentifyAll", "Val": enabled},
+        )
+
+    async def async_reconnect_wifi(self) -> None:
+        """Reconnect WiFi."""
+        await self._request(
+            "POST",
+            "/action",
+            json={"Action": "ReconnectWifi"},
+        )
+
+    async def async_scan_wifi(self) -> None:
+        """Start a WiFi scan."""
+        await self._request(
+            "POST",
+            "/action",
+            json={"Action": "ScanWifi"},
+        )
+
+    # -------------------------------------------------------------------------
+    # Config
+    # -------------------------------------------------------------------------
+
+    async def async_get_config(self) -> dict[str, Any]:
+        """Get the box configuration (raw).
+
+        Returns:
+            Raw JSON response from ``/config``.
+        """
+        return await self._request("GET", "/config")
+
+    async def async_set_node_name(self, node_id: int, name: str) -> None:
+        """Set the name of a node.
+
+        Args:
+            node_id: The node ID.
+            name: The new node name.
+        """
+        await self._request(
+            "PATCH",
+            f"/config/nodes/{node_id}",
+            json={"Name": name},
+        )
