@@ -4,10 +4,20 @@ Async Python client for the Duco ventilation box REST API.
 
 ## Supported hardware
 
+This library communicates with the **DUCO Connectivity Board** (article 0000-4810) via its local REST API over WiFi or Ethernet.
+
 | Hardware | Status |
 |---|---|
 | DUCO Connectivity Board 1.0 | Supported |
 | DUCO Connectivity Board 2.0 | Not tested |
+
+Compatible DucoBox models (as listed by Duco):
+
+- DucoBox Silent Connect
+- DucoBox Focus (from firmware version 17xxxx)
+- DucoBox Hygro Plus
+- DucoBox Energy Comfort / Energy Comfort Plus
+- DucoBox Energy Premium
 
 ## Installation
 
