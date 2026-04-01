@@ -37,6 +37,10 @@ htmlcov/
 # ruff
 .ruff_cache/
 
+# Local-only documentation
+DUCO_API.md
+docs/vendor/DUCO_API.md
+
 # AI instructions, skills and agents (local only)
 .github/instructions/
 .github/skills/

@@ -34,4 +34,3 @@ Original Duco documents are archived in [docs/vendor/](vendor/) for reference.
 |---|---|
 | [Technical datasheet](vendor/technische-fiche-Duco-Connectivity-Board-1.0-(nl).pdf) | Connectivity Board 1.0 — specifications and LED indicators (NL) |
 | [Installation guide](vendor/installatiehandleiding-Duco-Connectivity-Board-1.0-(nl).pdf) | Connectivity Board 1.0 — installation instructions (NL) |
-| [API documentation](vendor/DUCO_API.md) | Reverse-engineered REST API reference (EN) |
