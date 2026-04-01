@@ -155,11 +155,8 @@ def nodes_data():
 
 @pytest.fixture
 def node_ids_data():
-    """Mock response for GET /nodes."""
-    return {
-        "value": [{"Node": 1}, {"Node": 2}, {"Node": 113}],
-        "Count": 3,
-    }
+    """Mock response for GET /nodes (raw JSON array)."""
+    return [{"Node": 1}, {"Node": 2}, {"Node": 113}]
 
 
 @pytest.fixture

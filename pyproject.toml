@@ -56,6 +56,9 @@ addopts = [
     "--cov-report=term-missing",
     "-v",
 ]
+markers = [
+    "integration: marks tests as integration tests requiring a live Duco box (deselect with '-m not integration')",
+]
 
 # -- coverage ----------------------------------------------------------------
 [tool.coverage.run]

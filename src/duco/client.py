@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json as _json
 from typing import Any, cast
 
 from aiohttp import ClientSession
@@ -75,6 +76,11 @@ class DucoClient:
             DucoError: For API errors.
         """
         try:
+            # The Duco box rejects JSON with spaces between tokens.
+            # Serialize manually with compact separators when a json body is given.
+            if "json" in kwargs:
+                kwargs["data"] = _json.dumps(kwargs.pop("json"), separators=(",", ":")).encode()
+                kwargs.setdefault("headers", {})["Content-Type"] = "application/json"
             response = await self._session.request(
                 method,
                 f"{self._base_url}{path}",
@@ -259,7 +265,7 @@ class DucoClient:
             List of node IDs.
         """
         data = await self._request("GET", "/nodes")
-        return [item["Node"] for item in data["value"]]
+        return [item["Node"] for item in data]
 
     # -------------------------------------------------------------------------
     # Zones
