@@ -2,6 +2,13 @@
 
 Async Python client for the Duco ventilation box REST API.
 
+## Supported hardware
+
+| Hardware | Status |
+|---|---|
+| DUCO Connectivity Board 1.0 | Supported |
+| DUCO Connectivity Board 2.0 | Not tested |
+
 ## Installation
 
 ```bash
